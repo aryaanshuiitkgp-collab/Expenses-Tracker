@@ -3,7 +3,7 @@ import {
   Plus, X, TrendingUp, TrendingDown, Calendar, ChevronLeft, ChevronRight,
   Trash2, Bell, UtensilsCrossed, ShoppingBasket, Bus, Zap, Home, ShoppingBag,
   HeartPulse, Clapperboard, GraduationCap, Sparkles, PiggyBank, Gift,
-  Repeat, CreditCard, MoreHorizontal, ChevronDown
+  Repeat, CreditCard, MoreHorizontal, ChevronDown, Download, Upload
 } from "lucide-react";
 import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
 
@@ -61,6 +61,7 @@ export default function ExpenseTracker() {
   const [showForm, setShowForm] = useState(false);
   const [showReminder, setShowReminder] = useState(true);
 
+  // view: "months" | "days" | "transactions"
   const [view, setView] = useState("months");
   const [selectedMonth, setSelectedMonth] = useState(null);
   const [selectedDay, setSelectedDay] = useState(null);
@@ -72,6 +73,7 @@ export default function ExpenseTracker() {
   const [date, setDate] = useState(todayStr());
   const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
 
+  // Load saved expenses from the browser's local storage on first load
   useEffect(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
@@ -83,6 +85,7 @@ export default function ExpenseTracker() {
     }
   }, []);
 
+  // Save expenses to local storage whenever they change
   useEffect(() => {
     if (!loaded) return;
     try {
@@ -172,6 +175,68 @@ export default function ExpenseTracker() {
     setExpenses((prev) => prev.filter((e) => e.id !== id));
   }
 
+  function exportData() {
+    const headers = ["Date", "Category", "Merchant", "Note", "Amount"];
+    const rows = expenses
+      .slice()
+      .sort((a, b) => new Date(a.date) - new Date(b.date))
+      .map((e) => [
+        e.date,
+        e.category,
+        `"${(e.merchant || "").replace(/"/g, '""')}"`,
+        `"${(e.note || "").replace(/"/g, '""')}"`,
+        e.amount,
+      ]);
+    const csv = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `expenses-backup-${todayStr()}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function importData(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const text = e.target.result;
+        const lines = text.trim().split("\n");
+        const imported = [];
+        for (let i = 1; i < lines.length; i++) {
+          const line = lines[i];
+          if (!line.trim()) continue;
+          const matches = line.match(/(".*?"|[^,]+)(?=,|$)/g);
+          if (!matches || matches.length < 5) continue;
+          const clean = (s) => s.replace(/^"|"$/g, "").replace(/""/g, '"');
+          const [date, category, merchant, note, amount] = matches.map(clean);
+          const amt = parseFloat(amount);
+          if (!date || !amt) continue;
+          imported.push({
+            id: Date.now() + i,
+            date,
+            category: category || "Other",
+            merchant: merchant || "Unspecified",
+            note: note || "",
+            amount: amt,
+          });
+        }
+        if (imported.length > 0) {
+          setExpenses((prev) => [...prev, ...imported]);
+        }
+      } catch (err) {
+        console.error("Import failed", err);
+      }
+    };
+    reader.readAsText(file);
+    event.target.value = "";
+  }
+
   const bgStyle = {
     background: "linear-gradient(160deg, #eafaf3 0%, #f3fbf8 50%, #e8f7f0 100%)",
     minHeight: "100vh",
@@ -200,6 +265,23 @@ export default function ExpenseTracker() {
           </div>
         </header>
 
+        {view === "months" && (
+          <div className="flex gap-2 mb-4">
+            <button
+              onClick={exportData}
+              className={`${glass} flex-1 rounded-xl p-2.5 flex items-center justify-center gap-1.5 text-xs font-medium text-emerald-800 hover:bg-white/70 transition shadow-sm`}
+            >
+              <Download className="w-3.5 h-3.5" /> Backup (CSV)
+            </button>
+            <label
+              className={`${glass} flex-1 rounded-xl p-2.5 flex items-center justify-center gap-1.5 text-xs font-medium text-emerald-800 hover:bg-white/70 transition shadow-sm cursor-pointer`}
+            >
+              <Upload className="w-3.5 h-3.5" /> Restore
+              <input type="file" accept=".csv" onChange={importData} className="hidden" />
+            </label>
+          </div>
+        )}
+
         {view !== "months" && (
           <button
             onClick={goBack}
@@ -221,6 +303,7 @@ export default function ExpenseTracker() {
           </div>
         )}
 
+        {/* LEVEL 1: MONTHS */}
         {view === "months" && (
           <div className="space-y-2">
             {monthSummaries.length === 0 ? (
@@ -251,6 +334,7 @@ export default function ExpenseTracker() {
           </div>
         )}
 
+        {/* LEVEL 2: DAYS IN MONTH */}
         {view === "days" && selectedMonth && (
           <>
             <div className={`${glass} rounded-2xl p-5 mb-4 shadow-sm`}>
@@ -324,6 +408,7 @@ export default function ExpenseTracker() {
           </>
         )}
 
+        {/* LEVEL 3: TRANSACTIONS FOR A DAY */}
         {view === "transactions" && selectedDay && (
           <div className="space-y-2">
             {dayTransactions.map((e) => {
